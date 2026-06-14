@@ -1,12 +1,13 @@
 import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Settings, Map, Layers, Eye, BarChart3, Wrench, FileText, TrendingUp, AlertTriangle, Play, RotateCcw, CheckCircle, Clock, CircleDot, Zap, RefreshCw, GitBranch } from 'lucide-react';
+import { Settings, Map, Layers, Eye, BarChart3, Wrench, FileText, TrendingUp, AlertTriangle, Play, RotateCcw, CheckCircle, Clock, CircleDot, Zap, RefreshCw, GitBranch, ChevronDown, ChevronRight, FlaskConical, Beaker, ArrowDown, TrendingDown, TrendingUp as TrendingUpIcon } from 'lucide-react';
 import { cameraPresets, mockProcessPools } from '../services/mock/pools';
-import { useWaterPlantStore } from '../store/useWaterPlantStore';
+import { useWaterPlantStore, EmergencyCause } from '../store/useWaterPlantStore';
 import { useAuthStore } from '../store/useAuthStore';
 import { useNavigate } from 'react-router-dom';
-import { message, Tooltip } from 'antd';
-import type { CameraPreset, UserRole, ValveStatus } from '../types';
+import { message, Tooltip, Dropdown } from 'antd';
+import type { CameraPreset, UserRole, ValveStatus, BackwashReason } from '../types';
+import { formatTime } from '../utils/formatters';
 
 interface ControlPanelProps {
   onCameraPresetChange: (preset: CameraPreset) => void;
@@ -46,7 +47,7 @@ export function ControlPanel({ onCameraPresetChange }: ControlPanelProps) {
     isAutoBackwashEnabled,
     isEmergencyMode,
     activeEmergencyPoolId,
-    simulateTurbidityOverflow,
+    simulateOverflow,
     recoverEmergencyPool,
     setAutoBackwashEnabled,
     processBackwashQueue,
@@ -70,16 +71,31 @@ export function ControlPanel({ onCameraPresetChange }: ControlPanelProps) {
     return (fb?.priority || 0) - (fa?.priority || 0);
   });
 
-  const handleSimulateOverflow = (poolId: string) => {
-    simulateTurbidityOverflow(poolId);
+  const handleSimulateOverflow = (poolId: string, type: EmergencyCause = 'turbidity') => {
+    simulateOverflow(poolId, type);
     const pool = pools.find(p => p.id === poolId);
-    message.success(`已模拟${pool?.poolNo || poolId}浊度超标，自动启动应急流程`);
+    const typeText = type === 'turbidity' ? '浊度' : type === 'ph' ? 'pH' : type === 'chlorine' ? '余氯' : '多项指标';
+    message.success(`已模拟${pool?.poolNo || poolId}${typeText}超标，自动启动应急流程`);
   };
 
   const handleRecoverPool = (poolId: string) => {
     recoverEmergencyPool(poolId);
     const pool = pools.find(p => p.id === poolId);
-    message.success(`${pool?.poolNo || poolId}已恢复正常运行`);
+    message.success(`${pool?.poolNo || poolId}已恢复正常运行，加药切回常规模式`);
+  };
+
+  const getBackwashReasonText = (r?: BackwashReason) => {
+    if (r === 'head_loss') return '水头损失过高';
+    if (r === 'turbidity') return '出水浊度超标';
+    if (r === 'scheduled') return '计划排班';
+    if (r === 'manual') return '手动触发';
+    return '待判定';
+  };
+
+  const getBackwashReasonColor = (r?: BackwashReason) => {
+    if (r === 'head_loss') return 'text-orange-400 bg-orange-500/10 border-orange-500/30';
+    if (r === 'turbidity') return 'text-red-400 bg-red-500/10 border-red-500/30';
+    return 'text-slate-400 bg-slate-700/30 border-slate-600/30';
   };
 
   const emergencyPools = pools.filter(p => p.status === 'alarm');
@@ -143,7 +159,7 @@ export function ControlPanel({ onCameraPresetChange }: ControlPanelProps) {
                       验收模拟工具
                     </h4>
                     <div className="text-xs text-slate-400 mb-3">
-                      点击下方按钮模拟滤池浊度超标，查看自动应急流程
+                      选择模拟超标类型后点击触发，可完整观察「告警→关阀→通知→应急投加」链路
                     </div>
                     <div className="space-y-2">
                       {filterPools.map(pool => (
@@ -151,15 +167,26 @@ export function ControlPanel({ onCameraPresetChange }: ControlPanelProps) {
                           <span className="text-sm text-slate-300">{pool.poolNo}</span>
                           <div className="flex gap-2">
                             {pool.status !== 'alarm' ? (
-                              <Tooltip title="模拟浊度超标">
-                                <button
-                                  onClick={() => handleSimulateOverflow(pool.id)}
-                                  className="px-3 py-1.5 bg-red-500/20 hover:bg-red-500/40 border border-red-500/50 rounded-lg text-xs text-red-400 transition-all flex items-center gap-1"
+                              <>
+                                <Dropdown
+                                  menu={{
+                                    items: [
+                                      { key: 'turbidity', label: '模拟浊度超标' },
+                                      { key: 'ph', label: '模拟pH异常' },
+                                      { key: 'chlorine', label: '模拟余氯异常' },
+                                      { key: 'multi', label: '模拟多项超标' },
+                                    ],
+                                    onClick: ({ key }) => handleSimulateOverflow(pool.id, key as EmergencyCause),
+                                  }}
+                                  trigger={['click']}
                                 >
-                                  <AlertTriangle className="w-3 h-3" />
-                                  触发告警
-                                </button>
-                              </Tooltip>
+                                  <button className="px-3 py-1.5 bg-red-500/20 hover:bg-red-500/40 border border-red-500/50 rounded-lg text-xs text-red-400 transition-all flex items-center gap-1">
+                                    <AlertTriangle className="w-3 h-3" />
+                                    触发告警
+                                    <ChevronDown className="w-3 h-3" />
+                                  </button>
+                                </Dropdown>
+                              </>
                             ) : (
                               <Tooltip title="恢复正常状态">
                                 <button
@@ -179,8 +206,8 @@ export function ControlPanel({ onCameraPresetChange }: ControlPanelProps) {
                       <div className="mt-3 pt-3 border-t border-slate-700">
                         <div className="text-xs text-slate-400 mb-2">当前告警池：</div>
                         {emergencyPools.map(p => (
-                          <div key={p.id} className="text-xs text-red-400">
-                            • {p.poolNo} 浊度 {p.turbidity.toFixed(2)} NTU
+                          <div key={p.id} className="text-xs text-red-400 mb-1">
+                            • {p.poolNo} 浊度 {p.turbidity.toFixed(2)} NTU / pH {p.pH.toFixed(2)} / 余氯 {p.residualChlorine.toFixed(2)}
                           </div>
                         ))}
                       </div>
@@ -215,44 +242,116 @@ export function ControlPanel({ onCameraPresetChange }: ControlPanelProps) {
                     智能加药系统
                   </h4>
                   <div className="space-y-3">
-                    {dosingSystems.map((dosing) => (
-                      <div key={dosing.id} className={`bg-slate-800/50 rounded-xl p-4 border ${
-                        isEmergencyMode ? 'border-red-500/40 bg-red-500/5' : 'border-slate-700/50'
-                      }`}>
-                        <div className="flex items-center justify-between mb-2">
-                          <span className="text-sm font-medium text-white">{dosing.name}</span>
-                          <span className={`text-xs px-2 py-0.5 rounded-full ${
-                            dosing.status === 'normal' ? 'bg-green-500/20 text-green-400' :
-                            dosing.status === 'over' ? 'bg-red-500/20 text-red-400' :
-                            'bg-yellow-500/20 text-yellow-400'
-                          }`}>
-                            {dosing.status === 'normal' ? '正常' : 
-                             dosing.status === 'over' ? (isEmergencyMode ? '应急投加' : '超量') : '欠量'}
-                          </span>
+                    {dosingSystems.map((dosing) => {
+                      const plan = dosing.emergencyPlan;
+                      const history = dosing.dosingHistory || [];
+                      const maxDosage = Math.max(...history.map(h => h.dosage), dosing.calculatedDosage * 2, 1);
+                      return (
+                        <div key={dosing.id} className={`bg-slate-800/50 rounded-xl p-4 border ${
+                          plan ? 'border-red-500/40 bg-red-500/5' : 'border-slate-700/50'
+                        }`}>
+                          <div className="flex items-center justify-between mb-2">
+                            <span className="text-sm font-medium text-white flex items-center gap-2">
+                              {dosing.name}
+                              {plan && <FlaskConical className="w-3.5 h-3.5 text-red-400 animate-pulse" />}
+                            </span>
+                            <span className={`text-xs px-2 py-0.5 rounded-full ${
+                              dosing.status === 'normal' ? 'bg-green-500/20 text-green-400' :
+                              dosing.status === 'over' ? 'bg-red-500/20 text-red-400' :
+                              'bg-yellow-500/20 text-yellow-400'
+                            }`}>
+                              {dosing.status === 'normal' ? '正常' : 
+                               dosing.status === 'over' ? (plan ? '应急投加' : '超量') : '欠量'}
+                            </span>
+                          </div>
+
+                          {plan && (
+                            <div className="mb-3 p-2.5 bg-red-500/10 border border-red-500/30 rounded-lg">
+                              <div className="flex items-center justify-between mb-1.5">
+                                <span className="text-xs font-semibold text-red-400">{plan.planName}</span>
+                                <span className="text-[10px] text-red-300">
+                                  预计 {plan.estimatedRecoveryMinutes} 分钟恢复
+                                </span>
+                              </div>
+                              <div className="text-[10px] text-slate-400 mb-1.5">
+                                {plan.notes}
+                              </div>
+                              <div className="flex flex-wrap gap-1">
+                                {plan.chemicalTypes.map((c, i) => (
+                                  <span key={i} className="text-[10px] px-1.5 py-0.5 rounded bg-red-500/20 text-red-300 border border-red-500/30">
+                                    {c}
+                                  </span>
+                                ))}
+                              </div>
+                              <div className="mt-2 h-1.5 bg-slate-700 rounded-full overflow-hidden">
+                                <div 
+                                  className="h-full bg-gradient-to-r from-red-500 to-orange-400 transition-all duration-500"
+                                  style={{ 
+                                    width: `${Math.min(100, ((Date.now() - plan.activatedAt) / (plan.estimatedEndAt - plan.activatedAt)) * 100)}%` 
+                                  }}
+                                />
+                              </div>
+                              <div className="mt-1 flex justify-between text-[10px] text-slate-500">
+                                <span>{formatTime(plan.activatedAt)} 启动</span>
+                                <span>{formatTime(plan.estimatedEndAt)} 预计结束</span>
+                              </div>
+                            </div>
+                          )}
+
+                          <div className="grid grid-cols-2 gap-2 text-xs mb-3">
+                            <div>
+                              <p className="text-slate-500">原水浊度</p>
+                              <p className="text-white font-mono">{dosing.rawWaterTurbidity.toFixed(1)} NTU</p>
+                            </div>
+                            <div>
+                              <p className="text-slate-500">原水流量</p>
+                              <p className="text-white font-mono">{dosing.rawWaterFlow.toFixed(0)} m³/h</p>
+                            </div>
+                            <div>
+                              <p className="text-slate-500">计算投加量</p>
+                              <p className="text-cyan-400 font-mono">{dosing.calculatedDosage.toFixed(1)} kg/h</p>
+                            </div>
+                            <div>
+                              <p className="text-slate-500">实际投加量</p>
+                              <p className={`font-mono ${
+                                dosing.status === 'normal' ? 'text-green-400' :
+                                dosing.status === 'over' ? 'text-red-400' : 'text-yellow-400'
+                              }`}>{dosing.actualDosage.toFixed(1)} kg/h</p>
+                            </div>
+                          </div>
+
+                          {history.length > 2 && (
+                            <div className="border-t border-slate-700/50 pt-2">
+                              <div className="flex items-center gap-1 text-[10px] text-slate-500 mb-1.5">
+                                <TrendingUp className="w-3 h-3" />
+                                最近投加曲线
+                              </div>
+                              <div className="h-10 flex items-end gap-0.5">
+                                {history.slice(-24).map((h, i, arr) => {
+                                  const height = (h.dosage / maxDosage) * 100;
+                                  const isEmergency = plan && i === arr.length - 1;
+                                  return (
+                                    <div
+                                      key={i}
+                                      className={`flex-1 rounded-t transition-all ${
+                                        isEmergency ? 'bg-red-400' :
+                                        h.dosage > dosing.calculatedDosage * 1.1 ? 'bg-orange-400' :
+                                        'bg-cyan-500/70'
+                                      }`}
+                                      style={{ height: `${Math.max(5, height)}%` }}
+                                    />
+                                  );
+                                })}
+                              </div>
+                              <div className="flex justify-between mt-1 text-[9px] text-slate-600">
+                                <span>{formatTime(history[0]?.timestamp || Date.now())}</span>
+                                <span>当前: {dosing.actualDosage.toFixed(1)}</span>
+                              </div>
+                            </div>
+                          )}
                         </div>
-                        <div className="grid grid-cols-2 gap-2 text-xs">
-                          <div>
-                            <p className="text-slate-500">原水浊度</p>
-                            <p className="text-white font-mono">{dosing.rawWaterTurbidity.toFixed(1)} NTU</p>
-                          </div>
-                          <div>
-                            <p className="text-slate-500">原水流量</p>
-                            <p className="text-white font-mono">{dosing.rawWaterFlow.toFixed(0)} m³/h</p>
-                          </div>
-                          <div>
-                            <p className="text-slate-500">计算投加量</p>
-                            <p className="text-cyan-400 font-mono">{dosing.calculatedDosage.toFixed(1)} kg/h</p>
-                          </div>
-                          <div>
-                            <p className="text-slate-500">实际投加量</p>
-                            <p className={`font-mono ${
-                              dosing.status === 'normal' ? 'text-green-400' :
-                              dosing.status === 'over' ? 'text-red-400' : 'text-yellow-400'
-                            }`}>{dosing.actualDosage.toFixed(1)} kg/h</p>
-                          </div>
-                        </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 </div>
 
@@ -260,7 +359,7 @@ export function ControlPanel({ onCameraPresetChange }: ControlPanelProps) {
                   <div className="flex items-center justify-between mb-3">
                     <h4 className="text-sm font-medium text-cyan-400 flex items-center gap-2">
                       <Eye className="w-4 h-4" />
-                      滤池反冲洗
+                      滤池反冲洗 · 今日排班
                     </h4>
                     {hasPermission('supervisor') && (
                       <div className="flex items-center gap-2">
@@ -277,6 +376,35 @@ export function ControlPanel({ onCameraPresetChange }: ControlPanelProps) {
                       </div>
                     )}
                   </div>
+
+                  {activeBackwash.length > 0 && (
+                    <div className="bg-blue-500/10 border border-blue-500/30 rounded-xl p-3 mb-3">
+                      <div className="flex items-center gap-2 text-blue-400 text-xs font-medium mb-2">
+                        <Play className="w-3 h-3 animate-pulse" />
+                        正在反冲洗 ({activeBackwash.length}/1)
+                      </div>
+                      {activeBackwash.map(f => (
+                        <div key={f.id} className="bg-slate-800/60 rounded-lg p-2.5">
+                          <div className="flex items-center justify-between mb-1.5">
+                            <span className="text-sm font-semibold text-white">{f.filterNo}</span>
+                            <span className="text-xs px-2 py-0.5 rounded-full bg-blue-500/20 text-blue-400 animate-pulse">
+                              冲洗中 {f.backwashProgress}%
+                            </span>
+                          </div>
+                          <div className="w-full h-1.5 bg-slate-700 rounded-full overflow-hidden mb-2">
+                            <div
+                              className="h-full bg-gradient-to-r from-cyan-500 to-blue-500 rounded-full transition-all duration-500"
+                              style={{ width: `${f.backwashProgress}%` }}
+                            />
+                          </div>
+                          <div className="flex items-center justify-between text-[10px] text-slate-400">
+                            <span>原因: {getBackwashReasonText(f.backwashReason)}</span>
+                            <span>预计剩余: {Math.max(0, Math.ceil((100 - f.backwashProgress) / 2))} 秒</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                   
                   {sortedBackwashQueue.length > 0 && (
                     <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-xl p-3 mb-3">
@@ -284,15 +412,48 @@ export function ControlPanel({ onCameraPresetChange }: ControlPanelProps) {
                         <Clock className="w-3 h-3" />
                         等待队列 ({sortedBackwashQueue.length})
                       </div>
-                      <div className="space-y-1">
+                      <div className="space-y-1.5">
                         {sortedBackwashQueue.map((fid, idx) => {
                           const f = filters.find(x => x.id === fid);
+                          if (!f) return null;
                           return (
-                            <div key={fid} className="flex items-center justify-between text-xs">
-                              <span className="text-slate-300">
-                                {idx + 1}. {f?.filterNo}
-                              </span>
-                              <span className="text-cyan-400">优先级 {f?.priority}</span>
+                            <div key={fid} className="bg-slate-800/60 rounded-lg p-2.5 border border-yellow-500/20">
+                              <div className="flex items-center justify-between mb-1">
+                                <div className="flex items-center gap-2">
+                                  <span className="w-5 h-5 rounded-full bg-yellow-500/20 text-yellow-400 text-xs font-bold flex items-center justify-center">
+                                    {idx + 1}
+                                  </span>
+                                  <span className="text-sm font-medium text-white">{f.filterNo}</span>
+                                </div>
+                                <span className="text-xs text-cyan-400">优先级 P{f.priority}</span>
+                              </div>
+                              <div className="flex items-center justify-between text-[10px]">
+                                <span className={`px-1.5 py-0.5 rounded border ${getBackwashReasonColor(f.backwashReason)}`}>
+                                  {getBackwashReasonText(f.backwashReason)}
+                                </span>
+                                <span className="text-slate-400">
+                                  预计开始: {f.estimatedStartTime ? formatTime(f.estimatedStartTime) : '待定'}
+                                </span>
+                              </div>
+                              {f.priorityHistory && f.priorityHistory.length > 1 && (
+                                <div className="mt-1.5 flex items-end gap-0.5 h-5">
+                                  {f.priorityHistory.slice(-12).map((p, i, arr) => {
+                                    const height = (p.priority / 100) * 100;
+                                    const isLatest = i === arr.length - 1;
+                                    return (
+                                      <div
+                                        key={i}
+                                        className={`flex-1 rounded-t transition-all ${
+                                          isLatest ? 'bg-yellow-400' :
+                                          p.priority > 70 ? 'bg-orange-400/70' :
+                                          'bg-cyan-500/50'
+                                        }`}
+                                        style={{ height: `${Math.max(10, height)}%` }}
+                                      />
+                                    );
+                                  })}
+                                </div>
+                              )}
                             </div>
                           );
                         })}
@@ -301,69 +462,65 @@ export function ControlPanel({ onCameraPresetChange }: ControlPanelProps) {
                   )}
 
                   <div className="flex items-center justify-between text-xs text-slate-400 mb-2">
-                    <span>正在反冲洗: {activeBackwash.length}/1</span>
-                    {hasPermission('supervisor') && (
+                    <span>全部滤池状态</span>
+                    {hasPermission('supervisor') && activeBackwash.length === 0 && sortedBackwashQueue.length > 0 && (
                       <button
-                        onClick={() => { processBackwashQueue(); message.info('已处理反冲洗队列'); }}
+                        onClick={() => { processBackwashQueue(); message.info('已启动下一台反冲洗'); }}
                         className="text-cyan-400 hover:text-cyan-300 flex items-center gap-1"
                       >
                         <Play className="w-3 h-3" />
-                        立即处理
+                        立即启动下一台
                       </button>
                     )}
                   </div>
                   <div className="space-y-2">
-                    {sortedFilters.map((filter) => (
-                      <div key={filter.id} className={`bg-slate-800/50 rounded-xl p-3 border ${
-                        backwashQueue.includes(filter.id) ? 'border-yellow-500/40' : 'border-slate-700/50'
-                      }`}>
-                        <div className="flex items-center justify-between mb-2">
-                          <span className="text-sm font-medium text-white">{filter.filterNo}</span>
-                          <div className="flex items-center gap-2">
-                            <span className="text-xs text-cyan-400">P{filter.priority}</span>
-                            {filter.isBackwashing ? (
-                              <span className="text-xs px-2 py-0.5 rounded-full bg-blue-500/20 text-blue-400 animate-pulse">
-                                冲洗 {filter.backwashProgress}%
-                              </span>
-                            ) : backwashQueue.includes(filter.id) ? (
-                              <span className="text-xs px-2 py-0.5 rounded-full bg-yellow-500/20 text-yellow-400">
-                                排队中
-                              </span>
-                            ) : filter.priority > 70 ? (
-                              <span className="text-xs px-2 py-0.5 rounded-full bg-orange-500/20 text-orange-400">
-                                待冲洗
-                              </span>
-                            ) : (
-                              <span className="text-xs px-2 py-0.5 rounded-full bg-slate-700/50 text-slate-400">
-                                正常
-                              </span>
-                            )}
+                    {sortedFilters.map((filter) => {
+                      const inQueue = backwashQueue.includes(filter.id);
+                      return (
+                        <div key={filter.id} className={`bg-slate-800/50 rounded-xl p-3 border ${
+                          filter.isBackwashing ? 'border-blue-500/40' :
+                          inQueue ? 'border-yellow-500/40' : 'border-slate-700/50'
+                        }`}>
+                          <div className="flex items-center justify-between mb-2">
+                            <span className="text-sm font-medium text-white">{filter.filterNo}</span>
+                            <div className="flex items-center gap-2">
+                              <span className="text-xs text-cyan-400">P{filter.priority}</span>
+                              {filter.isBackwashing ? (
+                                <span className="text-xs px-2 py-0.5 rounded-full bg-blue-500/20 text-blue-400 animate-pulse">
+                                  冲洗 {filter.backwashProgress}%
+                                </span>
+                              ) : inQueue ? (
+                                <span className="text-xs px-2 py-0.5 rounded-full bg-yellow-500/20 text-yellow-400">
+                                  排队中
+                                </span>
+                              ) : filter.priority > 70 ? (
+                                <span className="text-xs px-2 py-0.5 rounded-full bg-orange-500/20 text-orange-400">
+                                  待冲洗
+                                </span>
+                              ) : (
+                                <span className="text-xs px-2 py-0.5 rounded-full bg-slate-700/50 text-slate-400">
+                                  正常
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                          <div className="grid grid-cols-2 gap-2 text-xs">
+                            <div>
+                              <p className="text-slate-500">水头损失</p>
+                              <p className={`font-mono ${filter.headLoss > 2.5 ? 'text-orange-400' : 'text-white'}`}>
+                                {filter.headLoss.toFixed(2)} m
+                              </p>
+                            </div>
+                            <div>
+                              <p className="text-slate-500">出水浊度</p>
+                              <p className={`font-mono ${filter.effluentTurbidity > 0.6 ? 'text-orange-400' : 'text-white'}`}>
+                                {filter.effluentTurbidity.toFixed(2)} NTU
+                              </p>
+                            </div>
                           </div>
                         </div>
-                        {filter.isBackwashing && (
-                          <div className="w-full h-1.5 bg-slate-700 rounded-full overflow-hidden mb-2">
-                            <div
-                              className="h-full bg-gradient-to-r from-cyan-500 to-blue-500 rounded-full transition-all duration-500"
-                              style={{ width: `${filter.backwashProgress}%` }}
-                            />
-                          </div>
-                        )}
-                        <div className="grid grid-cols-2 gap-2 text-xs">
-                          <div>
-                            <p className="text-slate-500">水头损失</p>
-                            <p className={`font-mono ${filter.headLoss > 2.5 ? 'text-orange-400' : 'text-white'}`}>
-                              {filter.headLoss.toFixed(2)} m
-                            </p>
-                          </div>
-                          <div>
-                            <p className="text-slate-500">出水浊度</p>
-                            <p className={`font-mono ${filter.effluentTurbidity > 0.6 ? 'text-orange-400' : 'text-white'}`}>
-                              {filter.effluentTurbidity.toFixed(2)} NTU
-                            </p>
-                          </div>
-                        </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 </div>
 

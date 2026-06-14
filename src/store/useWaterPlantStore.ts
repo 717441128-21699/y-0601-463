@@ -1,10 +1,12 @@
 import { create } from 'zustand';
-import type { ProcessPool, FilterData, DosingData, PumpHouseData, WaterQualityData, ValveStatus } from '../types';
+import type { ProcessPool, FilterData, DosingData, PumpHouseData, WaterQualityData, ValveStatus, EmergencyDosingPlan, BackwashReason } from '../types';
 import { mockProcessPools, mockFilters } from '../services/mock/pools';
 import { generate24HourHistory, mockDosingSystems, mockPumpHouseData } from '../services/mock/waterQuality';
 import { calculateOptimalDosage, calculateBackwashPriority, optimizePumpOperation, checkWaterQuality, generateId } from '../utils/algorithms';
 import { useAlarmStore } from './useAlarmStore';
 import { useAuthStore } from './useAuthStore';
+
+export type EmergencyCause = 'turbidity' | 'ph' | 'chlorine' | 'multi';
 
 interface WaterPlantState {
   pools: ProcessPool[];
@@ -27,17 +29,18 @@ interface WaterPlantState {
   updatePumpHouseData: (updates: Partial<PumpHouseData>) => void;
   setSelectedPool: (poolId: string | null) => void;
   getPoolHistory: (poolId: string) => WaterQualityData[];
-  triggerEmergencyShutdown: (poolId: string) => void;
+  triggerEmergencyShutdown: (poolId: string, cause?: EmergencyCause) => void;
   recoverEmergencyPool: (poolId: string) => void;
-  simulateTurbidityOverflow: (poolId: string) => void;
+  simulateOverflow: (poolId: string, type?: EmergencyCause) => void;
   simulateRealtimeUpdate: () => void;
   startBackwash: (filterId: string) => boolean;
   completeBackwash: (filterId: string) => void;
-  addToBackwashQueue: (filterId: string) => void;
+  addToBackwashQueue: (filterId: string, reason?: BackwashReason) => void;
   removeFromBackwashQueue: (filterId: string) => void;
   processBackwashQueue: () => void;
   setAutoBackwashEnabled: (enabled: boolean) => void;
   clearEmergencyProcessingFlag: (poolId: string) => void;
+  pushDosingHistoryPoint: () => void;
 }
 
 export const useWaterPlantStore = create<WaterPlantState>((set, get) => ({
@@ -125,7 +128,7 @@ export const useWaterPlantStore = create<WaterPlantState>((set, get) => ({
     return history;
   },
   
-  triggerEmergencyShutdown: (poolId) => {
+  triggerEmergencyShutdown: (poolId, cause = 'turbidity') => {
     const pool = get().pools.find(p => p.id === poolId);
     if (!pool) return;
     
@@ -139,16 +142,32 @@ export const useWaterPlantStore = create<WaterPlantState>((set, get) => ({
     const { currentUser } = useAuthStore.getState();
     const operatorName = currentUser ? currentUser.name : '系统自动';
     
+    let causeText = '';
+    let causeDetail = '';
+    if (cause === 'turbidity') {
+      causeText = '浊度超标';
+      causeDetail = `检测到浊度超标：${pool.turbidity.toFixed(2)} NTU，阈值：5.00 NTU`;
+    } else if (cause === 'ph') {
+      causeText = 'pH值异常';
+      causeDetail = `检测到pH值异常：${pool.pH.toFixed(2)}，正常范围：6.5~8.5`;
+    } else if (cause === 'chlorine') {
+      causeText = '余氯异常';
+      causeDetail = `检测到余氯异常：${pool.residualChlorine.toFixed(2)} mg/L，正常范围：0.3~4.0`;
+    } else {
+      causeText = '多项水质指标异常';
+      causeDetail = `检测到多项水质指标异常：浊度${pool.turbidity.toFixed(2)} NTU，pH${pool.pH.toFixed(2)}，余氯${pool.residualChlorine.toFixed(2)} mg/L`;
+    }
+    
     const alarm = addAlarm({
       level: 'danger',
       type: '水质异常',
-      message: `${pool.poolNo} ${pool.name} 浊度超标，启动应急处置流程`,
+      message: `${pool.poolNo} ${pool.name} ${causeText}，启动应急处置流程`,
       sourcePoolId: poolId,
     });
     
     addEmergencyAction(alarm.id, {
       type: 'alarm_generated',
-      detail: `检测到浊度超标：${pool.turbidity.toFixed(2)} NTU，阈值：5.00 NTU`,
+      detail: causeDetail,
       operator: operatorName,
     });
     
@@ -161,7 +180,7 @@ export const useWaterPlantStore = create<WaterPlantState>((set, get) => ({
     
     addEmergencyAction(alarm.id, {
       type: 'notified_center',
-      detail: `已推送异常信息至监测中心大屏及值班人员手机端`,
+      detail: `已推送异常信息至监测中心大屏及值班人员手机端，通知内容：${pool.poolNo}${causeText}`,
       operator: '系统自动',
     });
     
@@ -179,21 +198,40 @@ export const useWaterPlantStore = create<WaterPlantState>((set, get) => ({
         const { addEmergencyAction: addAction2 } = useAlarmStore.getState();
         addAction2(alarm.id, {
           type: 'valve_closed',
-          detail: `${pool.poolNo} 出水阀已关闭（${get().valveDisplayNameMap[valveId] || valveId}）`,
+          detail: `${pool.poolNo} 出水阀已完成关闭（${get().valveDisplayNameMap[valveId] || valveId}），已切断该工艺段出水`,
           operator: '系统自动',
         });
       }, 2500);
     }
     
+    const emergencyPlan: EmergencyDosingPlan = {
+      planName: cause === 'turbidity' ? '高浊度应急投加方案' :
+                cause === 'ph' ? 'pH异常应急调节方案' :
+                cause === 'chlorine' ? '余氯异常应急投加方案' : '综合水质应急方案',
+      estimatedRecoveryMinutes: cause === 'turbidity' ? 15 : cause === 'ph' ? 10 : 12,
+      chemicalTypes: cause === 'turbidity' ? ['PAC混凝剂', 'PAM助凝剂', '粉末活性炭'] :
+                     cause === 'ph' ? ['pH调节剂(氢氧化钠)', 'PAC混凝剂'] :
+                     cause === 'chlorine' ? ['次氯酸钠消毒液', '脱氯剂'] :
+                     ['PAC混凝剂', 'PAM助凝剂', '次氯酸钠', 'pH调节剂'],
+      multiplier: 1.8,
+      activatedAt: Date.now(),
+      estimatedEndAt: Date.now() + (cause === 'turbidity' ? 15 : cause === 'ph' ? 10 : 12) * 60 * 1000,
+      notes: cause === 'turbidity' ? '混凝剂提升至180%，同时启用活性炭应急投加管路，预计15分钟内水质回落' :
+             cause === 'ph' ? '启动氢氧化钠/硫酸自动调节系统，pH回调至7.0~7.5后切换回常规模式' :
+             cause === 'chlorine' ? '余氯异常，根据偏高/偏低自动切换次氯酸钠/脱氯剂投加' :
+             '综合应急方案已启动，全部药剂按最高安全剂量投加',
+    };
+    
     const dosingIds = get().dosingSystems.map(d => d.id);
     dosingIds.forEach(dosingId => {
       const dosing = get().dosingSystems.find(d => d.id === dosingId);
       if (dosing) {
-        const emergencyDosage = dosing.calculatedDosage * 1.8;
+        const emergencyDosage = dosing.calculatedDosage * emergencyPlan.multiplier;
         get().updateDosingData(dosingId, {
           actualDosage: Math.round(emergencyDosage * 100) / 100,
           pipelineFlow: Math.round(emergencyDosage * 0.95 * 100) / 100,
           status: 'over',
+          emergencyPlan,
         });
       }
     });
@@ -202,7 +240,7 @@ export const useWaterPlantStore = create<WaterPlantState>((set, get) => ({
       const { addEmergencyAction: addAction3 } = useAlarmStore.getState();
       addAction3(alarm.id, {
         type: 'emergency_dosing',
-        detail: `应急投加系统已启动：混凝剂投加量提升至180%，活性炭投加系统已激活`,
+        detail: `${emergencyPlan.planName}已执行：${emergencyPlan.chemicalTypes.join('、')}投加量提升至${Math.round(emergencyPlan.multiplier * 100)}%，预计${emergencyPlan.estimatedRecoveryMinutes}分钟恢复`,
         operator: '系统自动',
       });
     }, 3000);
@@ -253,6 +291,7 @@ export const useWaterPlantStore = create<WaterPlantState>((set, get) => ({
           actualDosage: Math.round(normalDosage * 100) / 100,
           pipelineFlow: Math.round(normalDosage * 0.95 * 100) / 100,
           status: 'normal',
+          emergencyPlan: null,
         });
       }
     });
@@ -260,23 +299,33 @@ export const useWaterPlantStore = create<WaterPlantState>((set, get) => ({
     if (relatedAlarm) {
       addEmergencyAction(relatedAlarm.id, {
         type: 'system_recovered',
-        detail: `${pool.poolNo} 水质恢复正常，系统恢复标准运行模式`,
+        detail: `${pool.poolNo} 水质已恢复正常范围，阀门已开启，加药量已切回常规投加模式，本次应急处置记录已归档`,
         operator: operatorName,
       });
     }
   },
   
-  simulateTurbidityOverflow: (poolId) => {
+  simulateOverflow: (poolId, type = 'turbidity') => {
     const pool = get().pools.find(p => p.id === poolId);
     if (!pool) return;
     
-    get().updatePoolData(poolId, {
-      turbidity: 8.5 + Math.random() * 3,
-      status: 'alarm',
-    });
+    const updates: Partial<ProcessPool> = { status: 'alarm' };
+    if (type === 'turbidity') {
+      updates.turbidity = 8.5 + Math.random() * 3;
+    } else if (type === 'ph') {
+      updates.pH = Math.random() > 0.5 ? 9.5 + Math.random() * 0.5 : 5.2 + Math.random() * 0.3;
+    } else if (type === 'chlorine') {
+      updates.residualChlorine = Math.random() > 0.5 ? 5.0 + Math.random() * 1.5 : 0.05 + Math.random() * 0.1;
+    } else {
+      updates.turbidity = 8.5 + Math.random() * 3;
+      updates.pH = 9.5;
+      updates.residualChlorine = 0.05;
+    }
+    
+    get().updatePoolData(poolId, updates);
     
     setTimeout(() => {
-      get().triggerEmergencyShutdown(poolId);
+      get().triggerEmergencyShutdown(poolId, type);
     }, 500);
   },
   
@@ -290,10 +339,10 @@ export const useWaterPlantStore = create<WaterPlantState>((set, get) => ({
         const newFlow = pool.currentFlow * flowVariation;
         const turbidityVariation = 0.95 + Math.random() * 0.1;
         const newTurbidity = pool.turbidity * turbidityVariation;
-        const pHVariation = (Math.random() - 0.5) * 0.1;
-        const newPH = Math.max(6.5, Math.min(8.5, pool.pH + pHVariation));
-        const chlorineVariation = 0.9 + Math.random() * 0.2;
-        const newChlorine = pool.residualChlorine * chlorineVariation;
+        const pHVariation = (Math.random() - 0.5) * 0.15;
+        const newPH = Math.max(6.0, Math.min(9.5, pool.pH + pHVariation));
+        const chlorineVariation = 0.85 + Math.random() * 0.3;
+        const newChlorine = Math.max(0.02, Math.min(5.0, pool.residualChlorine * chlorineVariation));
         
         const qualityCheck = checkWaterQuality(newTurbidity, newPH, newChlorine);
         
@@ -307,12 +356,26 @@ export const useWaterPlantStore = create<WaterPlantState>((set, get) => ({
         };
       });
       
-      const alarmPools = updatedPools.filter(p => p.turbidity > 5 && !state.processedEmergencyPoolIds.includes(p.id));
-      if (alarmPools.length > 0) {
+      const emergencyPoolCandidates: { id: string; cause: EmergencyCause }[] = [];
+      updatedPools.forEach(p => {
+        if (state.processedEmergencyPoolIds.includes(p.id)) return;
+        let cause: EmergencyCause | null = null;
+        const turbidityBad = p.turbidity > 5;
+        const phBad = p.pH < 6.0 || p.pH > 9.0;
+        const chlorineBad = p.residualChlorine < 0.05 || p.residualChlorine > 4.0;
+        const badCount = [turbidityBad, phBad, chlorineBad].filter(Boolean).length;
+        if (badCount >= 2) cause = 'multi';
+        else if (turbidityBad) cause = 'turbidity';
+        else if (phBad) cause = 'ph';
+        else if (chlorineBad) cause = 'chlorine';
+        if (cause) emergencyPoolCandidates.push({ id: p.id, cause });
+      });
+      
+      if (emergencyPoolCandidates.length > 0) {
         setTimeout(() => {
-          alarmPools.forEach(pool => {
-            if (!useWaterPlantStore.getState().processedEmergencyPoolIds.includes(pool.id)) {
-              useWaterPlantStore.getState().triggerEmergencyShutdown(pool.id);
+          emergencyPoolCandidates.forEach(({ id, cause }) => {
+            if (!useWaterPlantStore.getState().processedEmergencyPoolIds.includes(id)) {
+              useWaterPlantStore.getState().triggerEmergencyShutdown(id, cause);
             }
           });
         }, 200);
@@ -321,7 +384,7 @@ export const useWaterPlantStore = create<WaterPlantState>((set, get) => ({
       const updatedDosing = state.dosingSystems.map(dosing => {
         const intakePool = updatedPools.find(p => p.type === 'intake');
         if (!intakePool) return dosing;
-        if (state.isEmergencyMode) return dosing;
+        if (dosing.emergencyPlan) return dosing;
         
         const calculated = calculateOptimalDosage(intakePool.turbidity, intakePool.currentFlow);
         const actualVariation = 0.95 + Math.random() * 0.1;
@@ -331,6 +394,9 @@ export const useWaterPlantStore = create<WaterPlantState>((set, get) => ({
         if (actual > calculated * 1.1) status = 'over';
         else if (actual < calculated * 0.9) status = 'under';
         
+        const newHistory = [...(dosing.dosingHistory || []), { timestamp: Date.now(), dosage: Math.round(actual * 100) / 100 }];
+        if (newHistory.length > 50) newHistory.splice(0, newHistory.length - 50);
+        
         return {
           ...dosing,
           rawWaterTurbidity: intakePool.turbidity,
@@ -339,6 +405,7 @@ export const useWaterPlantStore = create<WaterPlantState>((set, get) => ({
           actualDosage: Math.round(actual * 100) / 100,
           status,
           pipelineFlow: Math.round(actual * 0.98 * 100) / 100,
+          dosingHistory: newHistory,
         };
       });
       
@@ -346,6 +413,7 @@ export const useWaterPlantStore = create<WaterPlantState>((set, get) => ({
         if (filter.isBackwashing) {
           const newProgress = Math.min(100, filter.backwashProgress + 2);
           if (newProgress >= 100) {
+            const newPriority = calculateBackwashPriority({ ...filter, headLoss: 0.4, effluentTurbidity: 0.35, lastBackwash: Date.now() });
             return {
               ...filter,
               isBackwashing: false,
@@ -353,7 +421,10 @@ export const useWaterPlantStore = create<WaterPlantState>((set, get) => ({
               headLoss: 0.3 + Math.random() * 0.2,
               effluentTurbidity: 0.3 + Math.random() * 0.1,
               lastBackwash: Date.now(),
-              priority: calculateBackwashPriority({ ...filter, headLoss: 0.4, effluentTurbidity: 0.35, lastBackwash: Date.now() }),
+              priority: newPriority,
+              backwashReason: undefined,
+              estimatedStartTime: undefined,
+              priorityHistory: [...(filter.priorityHistory || []), { timestamp: Date.now(), priority: newPriority }].slice(-20),
             };
           }
           return { ...filter, backwashProgress: newProgress };
@@ -363,26 +434,30 @@ export const useWaterPlantStore = create<WaterPlantState>((set, get) => ({
         const turbidityIncrease = 0.0005 + Math.random() * 0.001;
         const newHeadLoss = Math.min(3.0, filter.headLoss + headLossIncrease);
         const newTurbidity = Math.min(1.0, filter.effluentTurbidity + turbidityIncrease);
+        const newPriority = calculateBackwashPriority({ ...filter, headLoss: newHeadLoss, effluentTurbidity: newTurbidity });
+        
+        const newHistory = [...(filter.priorityHistory || []), { timestamp: Date.now(), priority: newPriority }];
         
         return {
           ...filter,
           headLoss: Math.round(newHeadLoss * 100) / 100,
           effluentTurbidity: Math.round(newTurbidity * 100) / 100,
-          priority: calculateBackwashPriority({ ...filter, headLoss: newHeadLoss, effluentTurbidity: newTurbidity }),
+          priority: newPriority,
+          priorityHistory: newHistory.slice(-20),
         };
       });
       
       if (state.isAutoBackwashEnabled) {
         const needsBackwash = updatedFilters.filter(f => 
-          !f.isBackwashing && (f.headLoss > 2.5 || f.effluentTurbidity > 0.6)
+          !f.isBackwashing && !state.backwashQueue.includes(f.id) && (f.headLoss > 2.5 || f.effluentTurbidity > 0.6)
         );
         
         needsBackwash.forEach(f => {
-          if (!state.backwashQueue.includes(f.id)) {
-            setTimeout(() => {
-              useWaterPlantStore.getState().addToBackwashQueue(f.id);
-            }, 300);
-          }
+          const reason: BackwashReason = f.headLoss > 2.5 && f.effluentTurbidity > 0.6 ? 'turbidity' : 
+                                        f.headLoss > 2.5 ? 'head_loss' : 'turbidity';
+          setTimeout(() => {
+            useWaterPlantStore.getState().addToBackwashQueue(f.id, reason);
+          }, 300);
         });
         
         setTimeout(() => {
@@ -483,6 +558,7 @@ export const useWaterPlantStore = create<WaterPlantState>((set, get) => ({
     get().updateFilterData(filterId, {
       isBackwashing: true,
       backwashProgress: 0,
+      estimatedStartTime: undefined,
     });
     
     return true;
@@ -495,19 +571,37 @@ export const useWaterPlantStore = create<WaterPlantState>((set, get) => ({
       headLoss: 0.3 + Math.random() * 0.2,
       effluentTurbidity: 0.3 + Math.random() * 0.1,
       lastBackwash: Date.now(),
+      backwashReason: undefined,
+      estimatedStartTime: undefined,
     });
   },
   
-  addToBackwashQueue: (filterId) => {
+  addToBackwashQueue: (filterId, reason) => {
     set(state => {
       if (state.backwashQueue.includes(filterId)) return state;
+      
+      const activeCount = state.filters.filter(f => f.isBackwashing).length;
+      const positionInQueue = state.backwashQueue.length;
+      const estimatedMinutes = activeCount * 8 + positionInQueue * 8 + 2;
+      
+      const filter = state.filters.find(f => f.id === filterId);
+      const finalReason: BackwashReason = reason || 
+        (filter && filter.headLoss > 2.5 ? 'head_loss' : 'turbidity');
+      
+      const newFilters = state.filters.map(f => f.id === filterId ? {
+        ...f,
+        backwashReason: finalReason,
+        estimatedStartTime: Date.now() + estimatedMinutes * 60 * 1000,
+      } : f);
+      
       const newQueue = [...state.backwashQueue, filterId];
       newQueue.sort((a, b) => {
-        const fa = state.filters.find(f => f.id === a);
-        const fb = state.filters.find(f => f.id === b);
+        const fa = newFilters.find(f => f.id === a);
+        const fb = newFilters.find(f => f.id === b);
         return (fb?.priority || 0) - (fa?.priority || 0);
       });
-      return { backwashQueue: newQueue };
+      
+      return { backwashQueue: newQueue, filters: newFilters };
     });
   },
   
@@ -549,6 +643,15 @@ export const useWaterPlantStore = create<WaterPlantState>((set, get) => ({
   clearEmergencyProcessingFlag: (poolId) => {
     set(state => ({
       processedEmergencyPoolIds: state.processedEmergencyPoolIds.filter(id => id !== poolId),
+    }));
+  },
+  
+  pushDosingHistoryPoint: () => {
+    set(state => ({
+      dosingSystems: state.dosingSystems.map(d => {
+        const newHistory = [...(d.dosingHistory || []), { timestamp: Date.now(), dosage: d.actualDosage }];
+        return { ...d, dosingHistory: newHistory.slice(-50) };
+      }),
     }));
   },
 }));
