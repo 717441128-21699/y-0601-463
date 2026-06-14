@@ -157,6 +157,9 @@ export const mockFilters: FilterData[] = [
     backwashProgress: 0,
     lastBackwash: Date.now() - 1000 * 60 * 60 * 12,
     position: [0, 0, 6],
+    backwashReason: undefined,
+    estimatedStartTime: undefined,
+    priorityHistory: [{ timestamp: Date.now(), priority: 45 }],
   },
   {
     id: 'filter-02',
@@ -168,6 +171,9 @@ export const mockFilters: FilterData[] = [
     backwashProgress: 0,
     lastBackwash: Date.now() - 1000 * 60 * 60 * 18,
     position: [0, 0, 0],
+    backwashReason: undefined,
+    estimatedStartTime: undefined,
+    priorityHistory: [{ timestamp: Date.now(), priority: 68 }],
   },
   {
     id: 'filter-03',
@@ -179,6 +185,9 @@ export const mockFilters: FilterData[] = [
     backwashProgress: 65,
     lastBackwash: Date.now() - 1000 * 60 * 60 * 22,
     position: [0, 0, -6],
+    backwashReason: 'head_loss',
+    estimatedStartTime: Date.now() - 1000 * 60 * 5,
+    priorityHistory: [{ timestamp: Date.now(), priority: 88 }],
   },
   {
     id: 'filter-04',
@@ -190,6 +199,9 @@ export const mockFilters: FilterData[] = [
     backwashProgress: 0,
     lastBackwash: Date.now() - 1000 * 60 * 60 * 2,
     position: [0, 0, -12],
+    backwashReason: undefined,
+    estimatedStartTime: undefined,
+    priorityHistory: [{ timestamp: Date.now(), priority: 15 }],
   },
 ];
 

@@ -40,7 +40,27 @@ export interface DosingData {
   actualDosage: number;
   status: DosingStatus;
   pipelineFlow: number;
+  emergencyPlan?: EmergencyDosingPlan | null;
+  dosingHistory: DosingHistoryPoint[];
 }
+
+export interface DosingHistoryPoint {
+  timestamp: number;
+  dosage: number;
+}
+
+export interface EmergencyDosingPlan {
+  planName: string;
+  estimatedRecoveryMinutes: number;
+  chemicalTypes: string[];
+  multiplier: number;
+  activatedAt: number;
+  estimatedEndAt: number;
+  notes: string;
+}
+
+export type BackwashStatus = 'idle' | 'waiting' | 'running' | 'completed';
+export type BackwashReason = 'head_loss' | 'turbidity' | 'scheduled' | 'manual';
 
 export interface FilterData {
   id: string;
@@ -52,6 +72,9 @@ export interface FilterData {
   backwashProgress: number;
   lastBackwash: number;
   position: [number, number, number];
+  backwashReason?: BackwashReason;
+  estimatedStartTime?: number;
+  priorityHistory?: { timestamp: number; priority: number }[];
 }
 
 export interface PumpHouseData {

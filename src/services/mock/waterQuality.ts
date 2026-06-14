@@ -37,6 +37,11 @@ export const mockDosingSystems: DosingData[] = [
     actualDosage: 86.5,
     status: 'normal',
     pipelineFlow: 85,
+    emergencyPlan: null,
+    dosingHistory: Array.from({ length: 24 }, (_, i) => ({
+      timestamp: Date.now() - (23 - i) * 3600000,
+      dosage: 80 + Math.random() * 15,
+    })),
   },
   {
     id: 'dosing-pam',
@@ -47,6 +52,11 @@ export const mockDosingSystems: DosingData[] = [
     actualDosage: 12.3,
     status: 'normal',
     pipelineFlow: 12,
+    emergencyPlan: null,
+    dosingHistory: Array.from({ length: 24 }, (_, i) => ({
+      timestamp: Date.now() - (23 - i) * 3600000,
+      dosage: 11 + Math.random() * 3,
+    })),
   },
   {
     id: 'dosing-chlorine',
@@ -57,6 +67,11 @@ export const mockDosingSystems: DosingData[] = [
     actualDosage: 28.5,
     status: 'over',
     pipelineFlow: 28,
+    emergencyPlan: null,
+    dosingHistory: Array.from({ length: 24 }, (_, i) => ({
+      timestamp: Date.now() - (23 - i) * 3600000,
+      dosage: 24 + Math.random() * 6,
+    })),
   },
 ];
 
