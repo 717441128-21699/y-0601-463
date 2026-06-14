@@ -63,6 +63,12 @@ export function ControlPanel({ onCameraPresetChange }: ControlPanelProps) {
   const sortedFilters = [...filters].sort((a, b) => b.priority - a.priority);
   const activeBackwash = filters.filter(f => f.isBackwashing);
   const filterPools = pools.filter(p => p.type === 'filter');
+  
+  const sortedBackwashQueue = [...backwashQueue].sort((a, b) => {
+    const fa = filters.find(f => f.id === a);
+    const fb = filters.find(f => f.id === b);
+    return (fb?.priority || 0) - (fa?.priority || 0);
+  });
 
   const handleSimulateOverflow = (poolId: string) => {
     simulateTurbidityOverflow(poolId);
@@ -272,14 +278,14 @@ export function ControlPanel({ onCameraPresetChange }: ControlPanelProps) {
                     )}
                   </div>
                   
-                  {backwashQueue.length > 0 && (
+                  {sortedBackwashQueue.length > 0 && (
                     <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-xl p-3 mb-3">
                       <div className="flex items-center gap-2 text-yellow-400 text-xs font-medium mb-2">
                         <Clock className="w-3 h-3" />
-                        等待队列 ({backwashQueue.length})
+                        等待队列 ({sortedBackwashQueue.length})
                       </div>
                       <div className="space-y-1">
-                        {backwashQueue.map((fid, idx) => {
+                        {sortedBackwashQueue.map((fid, idx) => {
                           const f = filters.find(x => x.id === fid);
                           return (
                             <div key={fid} className="flex items-center justify-between text-xs">
@@ -295,7 +301,7 @@ export function ControlPanel({ onCameraPresetChange }: ControlPanelProps) {
                   )}
 
                   <div className="flex items-center justify-between text-xs text-slate-400 mb-2">
-                    <span>正在反冲洗: {activeBackwash.length}/2</span>
+                    <span>正在反冲洗: {activeBackwash.length}/1</span>
                     {hasPermission('supervisor') && (
                       <button
                         onClick={() => { processBackwashQueue(); message.info('已处理反冲洗队列'); }}

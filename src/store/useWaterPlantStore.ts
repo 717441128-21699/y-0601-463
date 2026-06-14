@@ -18,6 +18,8 @@ interface WaterPlantState {
   poolValveMap: Record<string, string>;
   backwashQueue: string[];
   isAutoBackwashEnabled: boolean;
+  processedEmergencyPoolIds: string[];
+  valveDisplayNameMap: Record<string, string>;
   
   updatePoolData: (poolId: string, updates: Partial<ProcessPool>) => void;
   updateFilterData: (filterId: string, updates: Partial<FilterData>) => void;
@@ -35,6 +37,7 @@ interface WaterPlantState {
   removeFromBackwashQueue: (filterId: string) => void;
   processBackwashQueue: () => void;
   setAutoBackwashEnabled: (enabled: boolean) => void;
+  clearEmergencyProcessingFlag: (poolId: string) => void;
 }
 
 export const useWaterPlantStore = create<WaterPlantState>((set, get) => ({
@@ -58,6 +61,20 @@ export const useWaterPlantStore = create<WaterPlantState>((set, get) => ({
   },
   backwashQueue: [],
   isAutoBackwashEnabled: true,
+  processedEmergencyPoolIds: [],
+  valveDisplayNameMap: {
+    'valve-intake-outlet': '取水口出水阀',
+    'valve-sed1-outlet': '沉淀池1出水阀',
+    'valve-sed2-outlet': '沉淀池2出水阀',
+    'valve-filter1-outlet': '滤池1出水阀',
+    'valve-filter2-outlet': '滤池2出水阀',
+    'valve-filter3-outlet': '滤池3出水阀',
+    'valve-filter4-outlet': '滤池4出水阀',
+    'valve-clear-outlet': '清水池出水阀',
+    'valve-main-pump': '主泵阀组',
+    'valve-standby-pump': '备用泵阀组',
+    'valve-delivery': '输水总阀',
+  },
   
   updatePoolData: (poolId, updates) => {
     set(state => ({
@@ -112,6 +129,12 @@ export const useWaterPlantStore = create<WaterPlantState>((set, get) => ({
     const pool = get().pools.find(p => p.id === poolId);
     if (!pool) return;
     
+    if (get().processedEmergencyPoolIds.includes(poolId)) return;
+    
+    set(state => ({
+      processedEmergencyPoolIds: [...state.processedEmergencyPoolIds, poolId],
+    }));
+    
     const { addAlarm, addEmergencyAction } = useAlarmStore.getState();
     const { currentUser } = useAuthStore.getState();
     const operatorName = currentUser ? currentUser.name : '系统自动';
@@ -129,7 +152,10 @@ export const useWaterPlantStore = create<WaterPlantState>((set, get) => ({
       operator: operatorName,
     });
     
-    set({ isEmergencyMode: true, activeEmergencyPoolId: poolId });
+    set(state => ({
+      isEmergencyMode: true,
+      activeEmergencyPoolId: state.activeEmergencyPoolId || poolId,
+    }));
     
     get().updatePoolData(poolId, { status: 'alarm', currentFlow: 0 });
     
@@ -153,7 +179,7 @@ export const useWaterPlantStore = create<WaterPlantState>((set, get) => ({
         const { addEmergencyAction: addAction2 } = useAlarmStore.getState();
         addAction2(alarm.id, {
           type: 'valve_closed',
-          detail: `${pool.poolNo} 出水阀已关闭（${valveId}）`,
+          detail: `${pool.poolNo} 出水阀已关闭（${get().valveDisplayNameMap[valveId] || valveId}）`,
           operator: '系统自动',
         });
       }, 2500);
@@ -192,8 +218,9 @@ export const useWaterPlantStore = create<WaterPlantState>((set, get) => ({
     const operatorName = currentUser ? currentUser.name : '系统自动';
     
     set(state => ({
-      isEmergencyMode: state.pools.filter(p => p.status === 'alarm').length > 1,
+      isEmergencyMode: state.pools.filter(p => p.status === 'alarm' && p.id !== poolId).length > 0,
       activeEmergencyPoolId: state.activeEmergencyPoolId === poolId ? null : state.activeEmergencyPoolId,
+      processedEmergencyPoolIds: state.processedEmergencyPoolIds.filter(id => id !== poolId),
     }));
     
     get().updatePoolData(poolId, { 
@@ -280,11 +307,11 @@ export const useWaterPlantStore = create<WaterPlantState>((set, get) => ({
         };
       });
       
-      const alarmPools = updatedPools.filter(p => p.turbidity > 5 && p.status !== 'alarm');
-      if (alarmPools.length > 0 && !state.isEmergencyMode) {
+      const alarmPools = updatedPools.filter(p => p.turbidity > 5 && !state.processedEmergencyPoolIds.includes(p.id));
+      if (alarmPools.length > 0) {
         setTimeout(() => {
           alarmPools.forEach(pool => {
-            if (pool.status !== 'alarm') {
+            if (!useWaterPlantStore.getState().processedEmergencyPoolIds.includes(pool.id)) {
               useWaterPlantStore.getState().triggerEmergencyShutdown(pool.id);
             }
           });
@@ -451,7 +478,7 @@ export const useWaterPlantStore = create<WaterPlantState>((set, get) => ({
     if (!filter || filter.isBackwashing) return false;
     
     const activeBackwash = get().filters.filter(f => f.isBackwashing).length;
-    if (activeBackwash >= 2) return false;
+    if (activeBackwash >= 1) return false;
     
     get().updateFilterData(filterId, {
       isBackwashing: true,
@@ -494,7 +521,7 @@ export const useWaterPlantStore = create<WaterPlantState>((set, get) => ({
     const { filters, backwashQueue, startBackwash, removeFromBackwashQueue } = get();
     
     const activeBackwash = filters.filter(f => f.isBackwashing).length;
-    const availableSlots = 2 - activeBackwash;
+    const availableSlots = 1 - activeBackwash;
     
     if (availableSlots <= 0 || backwashQueue.length === 0) return;
     
@@ -517,5 +544,11 @@ export const useWaterPlantStore = create<WaterPlantState>((set, get) => ({
   
   setAutoBackwashEnabled: (enabled) => {
     set({ isAutoBackwashEnabled: enabled });
+  },
+  
+  clearEmergencyProcessingFlag: (poolId) => {
+    set(state => ({
+      processedEmergencyPoolIds: state.processedEmergencyPoolIds.filter(id => id !== poolId),
+    }));
   },
 }));
