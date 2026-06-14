@@ -1,16 +1,17 @@
 import { create } from 'zustand';
-import type { Alarm } from '../types';
+import type { Alarm, EmergencyAction } from '../types';
 import { mockAlarms } from '../services/mock/equipment';
 import { generateId } from '../utils/algorithms';
 
 interface AlarmState {
   alarms: Alarm[];
   
-  addAlarm: (alarm: Omit<Alarm, 'id' | 'timestamp' | 'acknowledged'>) => void;
+  addAlarm: (alarm: Omit<Alarm, 'id' | 'timestamp' | 'acknowledged'>) => Alarm;
   acknowledgeAlarm: (alarmId: string) => void;
   acknowledgeAll: () => void;
   removeAlarm: (alarmId: string) => void;
   getUnacknowledgedCount: () => number;
+  addEmergencyAction: (alarmId: string, action: Omit<EmergencyAction, 'id' | 'timestamp'>) => void;
 }
 
 export const useAlarmStore = create<AlarmState>((set, get) => ({
@@ -22,10 +23,12 @@ export const useAlarmStore = create<AlarmState>((set, get) => ({
       id: generateId(),
       timestamp: Date.now(),
       acknowledged: false,
+      emergencyActions: [],
     };
     set(state => ({
       alarms: [newAlarm, ...state.alarms],
     }));
+    return newAlarm;
   },
   
   acknowledgeAlarm: (alarmId) => {
@@ -50,5 +53,20 @@ export const useAlarmStore = create<AlarmState>((set, get) => ({
   
   getUnacknowledgedCount: () => {
     return get().alarms.filter(a => !a.acknowledged).length;
+  },
+  
+  addEmergencyAction: (alarmId, action) => {
+    const newAction: EmergencyAction = {
+      ...action,
+      id: generateId(),
+      timestamp: Date.now(),
+    };
+    set(state => ({
+      alarms: state.alarms.map(a => 
+        a.id === alarmId 
+          ? { ...a, emergencyActions: [...(a.emergencyActions || []), newAction] }
+          : a
+      ),
+    }));
   },
 }));

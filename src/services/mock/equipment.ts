@@ -1,5 +1,100 @@
-import type { Equipment, Alarm, WorkOrder } from '../../types';
+import type { Equipment, Alarm, WorkOrder, SparePart, SparePartItem } from '../../types';
 import { generateId } from '../../utils/algorithms';
+
+const makeParts = (names: [string, number, string][], stockMap: Record<string, number>): SparePartItem[] =>
+  names.map(([name, qty, unit]) => ({
+    name,
+    quantity: qty,
+    unit,
+    available: (stockMap[name] || 10) >= qty,
+    stock: stockMap[name] || 10,
+  }));
+
+const initialStock: Record<string, number> = {
+  '轴承套件': 8, '油封': 15, '润滑油': 25, '阀门密封组件': 6,
+  '执行器': 4, '叶轮': 3, '电机': 2, '加药泵保养套件': 5,
+  '机械密封件': 10, '过滤滤芯': 20, '加药泵隔膜': 6, '止回阀': 8,
+  '压力传感器': 4, '鼓风机空气滤芯': 12, '传动皮带': 10,
+  '密封垫圈': 30, '鼓风机叶轮': 3, '电机绕组': 2, '进气阀': 5,
+  '水泵机械密封': 8, '联轴器': 6, '轴承': 15, '泵轴': 4,
+  '压力变送器': 3, '阀门密封件': 12, '润滑脂': 18, '阀杆填料': 8,
+  '阀门阀芯': 4, '阀座密封圈': 10, '限位开关': 6, '电机轴承': 10,
+  '通用保养套件': 10,
+};
+
+export const mockSpareParts: SparePart[] = Object.entries(initialStock).map(([name, stock], i) => ({
+  id: `sp-${(i + 1).toString().padStart(3, '0')}`,
+  name,
+  category: name.includes('泵') ? '泵类备件' : name.includes('阀') ? '阀门备件' :
+            name.includes('鼓风') ? '风机备件' : name.includes('电机') || name.includes('轴承') ? '机电备件' :
+            name.includes('油') || name.includes('脂') ? '润滑材料' : '通用备件',
+  stock,
+  minStock: name.includes('套件') ? 2 : name.includes('电机') ? 1 : 5,
+  location: `备件库${['A', 'B', 'C'][i % 3]}区-${(i % 10) + 1}号货架`,
+  unit: ['台', '套', '个', '桶', '件', '只'][i % 6],
+  supplier: ['鑫源工控设备', '华德液压元件', '施耐德电气', '长城润滑油', '明达阀门'][i % 5],
+}));
+
+export const mockWorkOrders: WorkOrder[] = [
+  {
+    id: generateId(),
+    equipmentId: 'eq-003',
+    equipmentName: '1号鼓风机',
+    type: 'maintenance',
+    status: 'inProgress',
+    createTime: Date.now() - 3600000,
+    spareParts: makeParts([
+      ['轴承套件', 1, '套'],
+      ['油封', 2, '个'],
+      ['润滑油', 2, '桶'],
+    ], initialStock),
+    description: '累计运行12800小时，已超保养阈值800小时，需进行全面保养',
+    assignedTo: '张班长',
+    sparePartsNotified: true,
+    notificationSentTime: Date.now() - 3500000,
+  },
+  {
+    id: generateId(),
+    equipmentId: 'eq-009',
+    equipmentName: '沉淀池出水阀V-101',
+    type: 'repair',
+    status: 'pending',
+    createTime: Date.now() - 7200000,
+    spareParts: makeParts([
+      ['阀门密封件', 2, '套'],
+      ['执行器', 1, '台'],
+    ], initialStock),
+    description: '累计运行24000小时，开关不灵活，需更换密封组件',
+    sparePartsNotified: true,
+    notificationSentTime: Date.now() - 7100000,
+  },
+  {
+    id: generateId(),
+    equipmentId: 'eq-001',
+    equipmentName: '1号加药泵',
+    type: 'inspection',
+    status: 'pending',
+    createTime: Date.now() - 1800000,
+    spareParts: makeParts([
+      ['过滤滤芯', 2, '个'],
+    ], initialStock),
+    description: '累计运行7650小时，接近保养阈值，安排预防性检查',
+    sparePartsNotified: false,
+  },
+  {
+    id: generateId(),
+    equipmentId: 'eq-010',
+    equipmentName: '滤池进水阀V-201',
+    type: 'inspection',
+    status: 'completed',
+    createTime: Date.now() - 86400000,
+    spareParts: [],
+    description: '定期检查，阀门运行正常',
+    completedTime: Date.now() - 72000000,
+    assignedTo: '李值班员',
+    sparePartsNotified: false,
+  },
+];
 
 export const mockEquipment: Equipment[] = [
   {
@@ -156,45 +251,3 @@ export const mockAlarms: Alarm[] = [
   },
 ];
 
-export const mockWorkOrders: WorkOrder[] = [
-  {
-    id: generateId(),
-    equipmentId: 'eq-003',
-    equipmentName: '1号鼓风机',
-    type: 'maintenance',
-    status: 'inProgress',
-    createTime: Date.now() - 3600000,
-    spareParts: ['轴承套件', '油封', '润滑油'],
-    description: '累计运行12800小时，已超保养阈值800小时，需进行全面保养',
-  },
-  {
-    id: generateId(),
-    equipmentId: 'eq-009',
-    equipmentName: '沉淀池出水阀V-101',
-    type: 'repair',
-    status: 'pending',
-    createTime: Date.now() - 7200000,
-    spareParts: ['阀门密封组件', '执行器'],
-    description: '累计运行24000小时，开关不灵活，需更换密封组件',
-  },
-  {
-    id: generateId(),
-    equipmentId: 'eq-001',
-    equipmentName: '1号加药泵',
-    type: 'inspection',
-    status: 'pending',
-    createTime: Date.now() - 1800000,
-    spareParts: [],
-    description: '累计运行7650小时，接近保养阈值，安排预防性检查',
-  },
-  {
-    id: generateId(),
-    equipmentId: 'eq-010',
-    equipmentName: '滤池进水阀V-201',
-    type: 'inspection',
-    status: 'completed',
-    createTime: Date.now() - 86400000,
-    spareParts: [],
-    description: '定期检查，阀门运行正常',
-  },
-];

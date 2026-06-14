@@ -1,8 +1,9 @@
 import { useRef, useState } from 'react';
 import { useFrame } from '@react-three/fiber';
+import { Html } from '@react-three/drei';
 import * as THREE from 'three';
 import type { ProcessPool as ProcessPoolType, PoolType } from '../../types';
-import { getStatusColor } from '../../utils/formatters';
+import { getStatusColor, formatFlow, formatTurbidity, formatPH, formatResidualChlorine } from '../../utils/formatters';
 
 interface ProcessPoolProps {
   pool: ProcessPoolType;
@@ -28,6 +29,8 @@ export function ProcessPool({ pool, isSelected, onClick }: ProcessPoolProps) {
   const colors = poolColors[pool.type];
   const statusColor = getStatusColor(pool.status);
   const [w, h, d] = pool.size;
+  const hasWaterQuality = pool.type !== 'dosing' && pool.type !== 'controlRoom';
+  const statusText = pool.status === 'normal' ? '正常' : pool.status === 'warning' ? '预警' : '告警';
 
   useFrame((state) => {
     if (waterRef.current) {
@@ -137,6 +140,179 @@ export function ProcessPool({ pool, isSelected, onClick }: ProcessPoolProps) {
             <meshStandardMaterial color="#2D3748" roughness={0.5} metalness={0.5} />
           </mesh>
         </>
+      )}
+
+      {/* 漂浮数据标签 - 池号和状态 */}
+      <Html
+        position={[0, h + 1.5, 0]}
+        center
+        distanceFactor={15}
+        style={{ pointerEvents: 'none' }}
+      >
+        <div style={{
+          background: 'rgba(10, 22, 40, 0.92)',
+          border: `1px solid ${colors.accent}`,
+          borderRadius: '10px',
+          padding: '8px 14px',
+          backdropFilter: 'blur(10px)',
+          boxShadow: `0 4px 20px ${colors.accent}33`,
+          minWidth: '160px',
+        }}>
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            marginBottom: '4px',
+          }}>
+            <span style={{
+              fontFamily: 'Orbitron, monospace',
+              fontSize: '13px',
+              fontWeight: 'bold',
+              color: '#fff',
+              letterSpacing: '0.5px',
+            }}>
+              {pool.poolNo}
+            </span>
+            <div style={{
+              width: '8px',
+              height: '8px',
+              borderRadius: '50%',
+              background: statusColor,
+              boxShadow: `0 0 8px ${statusColor}`,
+              animation: pool.status === 'alarm' ? 'pulse-glow 0.5s infinite' : 'none',
+            }} />
+          </div>
+          <div style={{
+            fontFamily: 'Inter, sans-serif',
+            fontSize: '11px',
+            color: statusColor,
+            fontWeight: '600',
+          }}>
+            {statusText}运行
+          </div>
+        </div>
+      </Html>
+
+      {/* 漂浮数据标签 - 处理水量 */}
+      <Html
+        position={[-w / 2 - 0.8, h + 0.5, 0]}
+        center
+        distanceFactor={15}
+        style={{ pointerEvents: 'none' }}
+      >
+        <div style={{
+          background: 'rgba(10, 22, 40, 0.88)',
+          borderLeft: `3px solid #00D4FF`,
+          borderRadius: '8px',
+          padding: '6px 10px',
+          backdropFilter: 'blur(8px)',
+          boxShadow: '0 4px 16px rgba(0, 212, 255, 0.15)',
+          minWidth: '120px',
+        }}>
+          <div style={{
+            fontFamily: 'Inter, sans-serif',
+            fontSize: '10px',
+            color: '#94a3b8',
+            marginBottom: '2px',
+          }}>
+            处理水量
+          </div>
+          <div style={{
+            fontFamily: 'Orbitron, monospace',
+            fontSize: '14px',
+            fontWeight: 'bold',
+            color: '#00D4FF',
+            lineHeight: 1.2,
+          }}>
+            {formatFlow(pool.currentFlow)}
+          </div>
+        </div>
+      </Html>
+
+      {/* 漂浮数据标签 - 水质参数 */}
+      {hasWaterQuality && (
+        <Html
+          position={[w / 2 + 0.8, h / 2 + 0.5, 0]}
+          center
+          distanceFactor={15}
+          style={{ pointerEvents: 'none' }}
+        >
+          <div style={{
+            background: 'rgba(10, 22, 40, 0.88)',
+            borderRight: `3px solid ${colors.accent}`,
+            borderRadius: '8px',
+            padding: '8px 10px',
+            backdropFilter: 'blur(8px)',
+            boxShadow: `0 4px 16px ${colors.accent}22`,
+            minWidth: '110px',
+          }}>
+            <div style={{ marginBottom: '5px' }}>
+              <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                marginBottom: '1px',
+              }}>
+                <span style={{
+                  fontFamily: 'Inter, sans-serif',
+                  fontSize: '9px',
+                  color: '#94a3b8',
+                }}>浊度</span>
+                <span style={{
+                  fontFamily: 'Orbitron, monospace',
+                  fontSize: '11px',
+                  fontWeight: 'bold',
+                  color: pool.turbidity > 5 ? '#FF4757' : '#FFA502',
+                }}>
+                  {formatTurbidity(pool.turbidity)}
+                </span>
+              </div>
+            </div>
+            <div style={{ marginBottom: '5px' }}>
+              <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                marginBottom: '1px',
+              }}>
+                <span style={{
+                  fontFamily: 'Inter, sans-serif',
+                  fontSize: '9px',
+                  color: '#94a3b8',
+                }}>pH</span>
+                <span style={{
+                  fontFamily: 'Orbitron, monospace',
+                  fontSize: '11px',
+                  fontWeight: 'bold',
+                  color: (pool.pH < 6.5 || pool.pH > 8.5) ? '#FF4757' : '#2ED573',
+                }}>
+                  {formatPH(pool.pH)}
+                </span>
+              </div>
+            </div>
+            <div>
+              <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+              }}>
+                <span style={{
+                  fontFamily: 'Inter, sans-serif',
+                  fontSize: '9px',
+                  color: '#94a3b8',
+                }}>余氯</span>
+                <span style={{
+                  fontFamily: 'Orbitron, monospace',
+                  fontSize: '11px',
+                  fontWeight: 'bold',
+                  color: pool.residualChlorine < 0.3 ? '#FF4757' : '#1E90FF',
+                }}>
+                  {formatResidualChlorine(pool.residualChlorine)}
+                </span>
+              </div>
+            </div>
+          </div>
+        </Html>
       )}
     </group>
   );

@@ -68,11 +68,17 @@ export const mockPumpHouseData: PumpHouseData = {
   frequency: 48.5,
   standbyPumpOn: false,
   valveStatus: {
-    'v-001': 'open',
-    'v-002': 'open',
-    'v-003': 'open',
-    'v-004': 'closed',
-    'v-005': 'closed',
+    'valve-intake-outlet': 'open',
+    'valve-sed1-outlet': 'open',
+    'valve-sed2-outlet': 'open',
+    'valve-filter1-outlet': 'open',
+    'valve-filter2-outlet': 'open',
+    'valve-filter3-outlet': 'open',
+    'valve-filter4-outlet': 'open',
+    'valve-clear-outlet': 'open',
+    'valve-main-pump': 'open',
+    'valve-standby-pump': 'closed',
+    'valve-delivery': 'open',
   },
 };
 

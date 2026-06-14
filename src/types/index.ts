@@ -83,6 +83,15 @@ export interface Alarm {
   timestamp: number;
   acknowledged: boolean;
   sourcePoolId?: string;
+  emergencyActions?: EmergencyAction[];
+}
+
+export interface EmergencyAction {
+  id: string;
+  type: 'alarm_generated' | 'valve_closed' | 'notified_center' | 'emergency_dosing' | 'system_recovered';
+  timestamp: number;
+  detail: string;
+  operator?: string;
 }
 
 export interface WorkOrder {
@@ -92,8 +101,31 @@ export interface WorkOrder {
   type: WorkOrderType;
   status: WorkOrderStatus;
   createTime: number;
-  spareParts: string[];
+  spareParts: SparePartItem[];
   description: string;
+  assignedTo?: string;
+  completedTime?: number;
+  sparePartsNotified: boolean;
+  notificationSentTime?: number;
+}
+
+export interface SparePartItem {
+  name: string;
+  quantity: number;
+  unit: string;
+  available: boolean;
+  stock: number;
+}
+
+export interface SparePart {
+  id: string;
+  name: string;
+  category: string;
+  stock: number;
+  minStock: number;
+  location: string;
+  unit: string;
+  supplier: string;
 }
 
 export interface User {
